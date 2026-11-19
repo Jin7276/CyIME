@@ -5,8 +5,18 @@ enum class KeyboardInputPage { TEXT, SYMBOLS, NUMBERS }
 
 data class KeyboardModeTarget(val label: String, val action: String)
 
-fun modeSlotTarget(page: KeyboardInputPage, slot: Int, textLabel: String): KeyboardModeTarget {
+/**
+ * 两个固定槽位：默认符号在最左、数字紧跟；[swapped]（设置 ›「交换符号和数字键」）时换过来，数字在最左、符号在右。
+ * 符号页 / 数字页的返回键跟着那两格换边，保证「返回键盘」始终在另一个键的右边（与换位后的位置一致）。
+ */
+fun modeSlotTarget(page: KeyboardInputPage, slot: Int, textLabel: String, swapped: Boolean = false): KeyboardModeTarget {
     require(slot in 1..2)
+    if (swapped) return when {
+        slot == 1 && page == KeyboardInputPage.NUMBERS -> KeyboardModeTarget(textLabel, "abc")
+        slot == 1 -> KeyboardModeTarget("123", "number")
+        page == KeyboardInputPage.SYMBOLS -> KeyboardModeTarget(textLabel, "abc")
+        else -> KeyboardModeTarget("!@#", "symbol")
+    }
     return when {
         slot == 1 && page == KeyboardInputPage.SYMBOLS -> KeyboardModeTarget(textLabel, "abc")
         slot == 1 -> KeyboardModeTarget("!@#", "symbol")

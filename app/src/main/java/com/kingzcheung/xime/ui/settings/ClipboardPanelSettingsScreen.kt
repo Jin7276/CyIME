@@ -53,6 +53,7 @@ import com.kingzcheung.xime.clipboard.ClipboardRecentImageCounts
 import com.kingzcheung.xime.clipboard.clipboardRecentImageCount
 import com.kingzcheung.xime.ui.menubar.CLIPBOARD_CARD_MAX_LINES_KEY
 import com.kingzcheung.xime.ui.menubar.CLIPBOARD_CLOSE_AFTER_PASTE_KEY
+import com.kingzcheung.xime.clipboard.CLIPBOARD_GROUPS_HIDDEN_KEY
 import com.kingzcheung.xime.ui.menubar.clipboardCardMaxLines
 import com.kingzcheung.xime.ui.menubar.clipboardClosesAfterPaste
 
@@ -122,14 +123,27 @@ private fun ClipboardPanelDisplaySettings(onNavigateToGroups: () -> Unit) {
     // Same value as 启用/关闭最近截图 in the clipboard's ⋯ menu; the permission answer comes back on resume.
     val screenshotsOn by images.photoAccess.collectAsState()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { images.refresh() }
+    // 关闭分组显示：剪贴板面板不再有分类 / 分组入口（分组和里面的记录都保留）。
+    var groupsHidden by remember { mutableStateOf(prefs.getBoolean(CLIPBOARD_GROUPS_HIDDEN_KEY, false)) }
     SettingsSection(title = "显示", content = {
-        SettingsItem(
+        if (!groupsHidden) SettingsItem(
             icon = Icons.TwoTone.Folder,
             title = "剪贴板分组",
             subtitle = "自带分类，和自己建的常用语、工作等分组",
             onClick = onNavigateToGroups,
             showArrow = true,
             status = groups.groups.size.takeIf { it > 0 }?.let { "$it 个" },
+        )
+        SettingsToggleItem(
+            icon = Icons.TwoTone.Folder,
+            title = "关闭分组显示",
+            subtitle = "剪贴板里不再显示「全部 / 文本 / 链接…」和自建分组那一排入口，记录只按时间排。" +
+                "分组本身和里面的内容都保留，关掉这个开关就回来",
+            checked = groupsHidden,
+            onCheckedChange = { on ->
+                groupsHidden = on
+                prefs.edit().putBoolean(CLIPBOARD_GROUPS_HIDDEN_KEY, on).apply()
+            },
         )
         Column(Modifier.settingsSearchAnchor("卡片显示行数").fillMaxWidth().padding(16.dp)) {
             Text("卡片显示行数", style = MaterialTheme.typography.titleSmall)

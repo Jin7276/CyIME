@@ -81,6 +81,20 @@ object SettingsPreferences {
     }
 
     /**
+     * 交换键盘打字主界面左下角「符号」「数字」两个键的位置：默认关（符号在左、数字在右，原样）。
+     * 打开后数字在左、符号在右；符号页、数字页那一格的返回键跟着换边（见 KeyboardModeNavigation.modeSlotTarget）。
+     * [modeKeySwapVersion] 在开关变化时 +1，键盘据此立刻重组，不用等它重新弹出。
+     */
+    const val KEY_SWAP_SYMBOL_NUMBER = "swap_symbol_number_keys"
+    val modeKeySwapVersion = kotlinx.coroutines.flow.MutableStateFlow(0)
+    fun isSymbolNumberSwapped(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_SWAP_SYMBOL_NUMBER, false)
+    fun setSymbolNumberSwapped(context: Context, swapped: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_SWAP_SYMBOL_NUMBER, swapped).apply()
+        modeKeySwapVersion.value++
+    }
+
+    /**
      * 标点上屏首选：中文打字中点逗号、句号这类断句标点时，先上屏首选候选再接标点（nihao 点逗号得到「你好，」）。
      * 默认关：关着时照旧先上屏打的字母（Gboard 规则，用户 10-24），这是别的用户要的选项（11-02）。
      */

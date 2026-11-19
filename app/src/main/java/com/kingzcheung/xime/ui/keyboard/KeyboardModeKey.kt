@@ -2,6 +2,9 @@ package com.kingzcheung.xime.ui.keyboard
 
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,7 +36,14 @@ internal fun KeyboardModeKey(
     ctrlTargets: ShiftSlideTargets? = null,
     onCtrlShortcut: ((Char) -> Unit)? = null,
 ) {
-    val target = modeSlotTarget(page, slot, LocalTextModeLabel.current)
+    // 设置「交换符号和数字键」：开关一变（modeKeySwapVersion）就重新读，键盘立刻换边。
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val swapVersion by com.kingzcheung.xime.settings.SettingsPreferences.modeKeySwapVersion
+        .collectAsState()
+    val swapped = androidx.compose.runtime.remember(swapVersion) {
+        com.kingzcheung.xime.settings.SettingsPreferences.isSymbolNumberSwapped(context)
+    }
+    val target = modeSlotTarget(page, slot, LocalTextModeLabel.current, swapped)
     androidx.compose.runtime.CompositionLocalProvider(LocalKeyboardPunctuation provides null) {
     if (ctrlTargets != null && onCtrlShortcut != null && target.action == "symbol") CtrlSymbolKeyButton(
         text = target.label,

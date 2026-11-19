@@ -330,11 +330,35 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private val hardwareCapsLockState = mutableStateOf(false)
     private val quickSendItemsState = mutableStateOf<List<com.kingzcheung.xime.clipboard.ClipboardItem>>(emptyList())
     internal val recentClipboardItemsState = mutableStateOf<List<com.kingzcheung.xime.clipboard.ClipboardItem>>(emptyList())
+    /**
+     * 候选栏剪贴板胶囊「同一内容只显示一次」：这一轮输入里已经显示过的复制内容（按文字算）记在这里，
+     * 之后换输入框、收起再弹出键盘都不再重复显示同一条（用户反馈：复制后点输入框粘贴，复制的内容反复出现在候选栏）。
+     * 点胶囊上屏照旧标成已用（[com.kingzcheung.xime.clipboard.ClipboardManager.markConsumed]），新复制的内容不受影响。
+     */
+    private val shownClipSuggestionTexts = LinkedHashSet<String>()
+    /** 记多少条就够；超出丢最早的，避免长会话一直涨。 */
+    private val shownClipSuggestionLimit = 64
     /** 候选栏剪贴板胶囊的各项：每条原文，带链接的后面跟干净链接和 BV 号（见 ClipboardLinkChoices）。 */
     internal fun clipboardBarTexts(items: List<com.kingzcheung.xime.clipboard.ClipboardItem>): List<String> =
         com.kingzcheung.xime.clipboard.ClipboardLinkChoices.expandItems(items).map {
             com.kingzcheung.xime.clipboard.ClipboardLinkChoices.shownText(items, it)
         }
+
+    /**
+     * 这一轮输入结束了：把刚在候选栏显示过的复制内容记下来，下次（换输入框、收起再弹出）不再显示同一内容。
+     * 只在主线程调用；[recentClipboardItemsState] 为空时什么都不做。
+     */
+    private fun rememberShownClipSuggestions() {
+        // 短信验证码那种一次性提示（还没过期就还能用）不算在里面，免得换个输入框就不提示了。
+        val code = if (::clipboardManager.isInitialized) clipboardManager.verificationCode.value?.text else null
+        recentClipboardItemsState.value.forEach { item ->
+            if (item.text.isEmpty() || item.text == code) return@forEach
+            shownClipSuggestionTexts.add(item.text)
+            while (shownClipSuggestionTexts.size > shownClipSuggestionLimit) {
+                shownClipSuggestionTexts.remove(shownClipSuggestionTexts.first())
+            }
+        }
+    }
 
 
     private val bottomInsetPxState = mutableStateOf(0)
@@ -3980,7 +4004,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         try {
             if (clipboardManager.images.pasteFailure.value?.packageName != attribute?.packageName) clipboardManager.images.clearPasteFailure()
             clipboardManager.refreshClipboard()
+            // 同一内容只显示一次：这一轮之前已经显示过的复制内容不再重复出现在候选栏。
             recentClipboardItemsState.value = clipboardManager.getRecentItems(30)
+                .filterNot { it.text in shownClipSuggestionTexts }
+                .distinctBy { it.text }
             val recentImage = clipboardManager.images.preview.value?.takeIf { it.timestamp >= (recentClipboardItemsState.value.maxOfOrNull { item -> item.timestamp } ?: 0) }
             // 将最近剪切板内容显示在候选栏。没有可显示的就不标成「在显示剪贴板」：以前一律标上，
             // 回到输入框（微信退出聊天再进来）第一下退格只去收起这个看不见的剪贴板，不删字（用户 11-01）。
@@ -4000,7 +4027,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         clipboardCollectorJob?.cancel()
         clipboardCollectorJob = serviceScope.launch {
             combine(clipboardManager.clipboardItems, clipboardManager.verificationCode, clipboardManager.images.preview) { _, _, _ -> Unit }.collect {
+                // 同一内容只显示一次：本次会话开始前已经显示过的复制内容不再重复显示。
                 val items = clipboardManager.getRecentItems(30)
+                    .filterNot { it.text in shownClipSuggestionTexts }
+                    .distinctBy { it.text }
                 if (!canShowClipboardSuggestions(candidateState.value.isComposing,
                         candidateState.value.pendingEnglishText, inputCommands.hasPendingCommands)) return@collect
                 recentClipboardItemsState.value = items
@@ -4519,6 +4549,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         EnterKeyAction.label(editorInfo.imeOptions, appSend = SettingsPreferences.isEnterSendsEnabled(this))
 
     override fun onFinishInput() {
+        // 会话结束：候选栏刚才显示过的复制内容记下来，这次之后不再重复显示（见 rememberShownClipSuggestions）。
+        rememberShownClipSuggestions()
         gameShowExplicit = false
         suspendCompositionForScreenOff()
         endGlidePreview()
@@ -4606,6 +4638,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        // 键盘收起（返回键、切到别的应用）也算这一轮结束：已经显示过的复制内容下次不再重复显示。
+        rememberShownClipSuggestions()
         gameShowExplicit = false
         com.kingzcheung.xime.runtime.adaptation.CpuBenchmarkRunner.keyboardShown = false
         backgroundMotionWindowShown.value = false

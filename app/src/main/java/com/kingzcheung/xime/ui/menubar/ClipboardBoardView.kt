@@ -113,6 +113,8 @@ internal fun ConnectedClipboardBoard(
     val recentImageCount = remember(prefs) { clipboardRecentImageCount(prefs.getInt(CLIPBOARD_RECENT_IMAGE_COUNT_KEY, 4)) }
     // 平铺 / 列表，顶栏按钮切换，记住上次选的（用户 11-14）。
     var listLayout by remember(prefs) { mutableStateOf(prefs.getBoolean(CLIPBOARD_LIST_LAYOUT_KEY, false)) }
+    // 关闭分组显示（设置 › 剪贴板）：不显示分类/分组入口，记录只按时间排。
+    val groupsHidden = remember(prefs) { prefs.getBoolean(CLIPBOARD_GROUPS_HIDDEN_KEY, false) }
     var closeAfterPaste by remember(prefs) { mutableStateOf(clipboardClosesAfterPaste(prefs)) }
     // A search submitted from the keyboard search bar shows only its matches (fixed records too).
     val boardQuery by manager.boardQuery.collectAsState()
@@ -186,6 +188,7 @@ internal fun ConnectedClipboardBoard(
             store.removeImages(images.filterIsInstance<ClipboardCard.Image>().map { it.item.uri }.toSet())
         }, cardMaxLines = cardMaxLines, imageHeight = imageHeight, recentImageCount = recentImageCount,
         listLayout = listLayout,
+        groupsHidden = groupsHidden,
         onListLayoutChange = { value ->
             listLayout = value
             prefs.edit().putBoolean(CLIPBOARD_LIST_LAYOUT_KEY, value).apply()
@@ -308,6 +311,8 @@ internal fun ClipboardBoardView(
     onCloseAfterPasteChange: (Boolean) -> Unit = {},
     /** The user's groups: tabs after the built-in categories, and what is in each. */
     groups: ClipboardGroupState = ClipboardGroupState(),
+    /** 关闭分组显示（设置 › 剪贴板）：顶栏没有分类/分组入口，长按菜单没有「分组」，只按时间排。 */
+    groupsHidden: Boolean = false,
     /** Tab key to open on instead of 全部 / 图片 (back from the add / edit form). */
     initialTabKey: String? = null,
     /** Puts records into a group (null: out of their group); they are not fixed. */
@@ -328,7 +333,10 @@ internal fun ClipboardBoardView(
 ) {
     val colors = MaterialTheme.colorScheme
     val appContext = LocalContext.current.applicationContext
-    val tabs = remember(groups) { clipboardTabs(groups) }
+    val tabs = remember(groups, groupsHidden) {
+        // 关闭分组显示：分类和分组都不再显示入口，只剩「全部」一页，按时间倒序。
+        if (groupsHidden) listOf(ClipboardTab.Category(ClipboardFilter.ALL)) else clipboardTabs(groups)
+    }
     var chosenTab by remember(initialImages) { mutableStateOf<ClipboardTab>(
         tabs.firstOrNull { it.key == initialTabKey }
             ?: ClipboardTab.Category(if (initialImages) ClipboardFilter.IMAGE else ClipboardFilter.ALL)) }
@@ -436,7 +444,9 @@ internal fun ClipboardBoardView(
             // The source rectangles are opening-time snapshots. Resizing must not reuse stale anchors.
             menu = false; itemMenu = null; groupMenu = null; deleting = null
         }
-        val list = remember(cards, listLayout) { clipboardListLayout(listLayout, cards) }
+        // 每行只显示一条：有文字记录时一律用列表版式（一条一行，图片拼成一条横着滑的小图），
+        // 不随宽度分栏；只有图片的页（「图片」）仍按宽度分栏，免得一张图占满一屏。
+        val list = remember(cards) { clipboardListLayout(true, cards) }
         val columns = if (list) 1 else clipboardColumnCount(maxWidth.value)
         val compactControls = maxWidth.value / LocalDensity.current.fontScale < 360f
         val content = remember(cards, pins, columns, pinsExpanded) {
@@ -577,7 +587,15 @@ internal fun ClipboardBoardView(
                         enabled = selected.isNotEmpty(), label = if (compactControls) null else "删除",
                         modifier = Modifier.onGloballyPositioned { deleteBounds[0] = it.boundsInRoot() })
                 } else {
-                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    if (groupsHidden) {
+                        // 关闭分组显示：顶栏不放分类 / 分组入口，只留搜索条件的清除胶囊。
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            searchQuery?.takeIf { searchChip }?.let { query ->
+                                CompactClipboardFilter("🔍 $query ✕", true, onClearSearch,
+                                    Modifier.testTag("clipboard-search-chip"))
+                            }
+                        }
+                    } else Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         searchQuery?.takeIf { searchChip }?.let { query ->
                             CompactClipboardFilter("🔍 $query ✕", true, onClearSearch,
@@ -601,11 +619,7 @@ internal fun ClipboardBoardView(
                                 pinsActuallyExpanded, colors.onSurface)
                         }
                     }
-                    onListLayoutChange?.let { change ->
-                        // The icon shows the layout a tap switches to.
-                        CompactClipboardAction(if (listLayout) Icons.Default.GridView else Icons.Default.ViewAgenda,
-                            if (listLayout) "切换为平铺" else "切换为列表", { change(!listLayout) }, "clipboard-layout")
-                    }
+                    // 每行只显示一条之后不再有平铺 / 列表之分，顶栏的切换按钮撤掉。
                     onOpenSearch?.let {
                         CompactClipboardAction(Icons.Default.Search, "搜索剪贴板", it, "clipboard-search")
                     }
@@ -771,7 +785,7 @@ internal fun ClipboardBoardView(
                 add(LongPressMenuEntry(Icons.Default.PushPin, if (card.key in pins) "取消固定" else "固定") {
                     onPinsChange(if (card.key in pins) pins - card.key else pins + card.key)
                 })
-                if (groups.groups.isNotEmpty() || onManageGroups != null) {
+                if (!groupsHidden && (groups.groups.isNotEmpty() || onManageGroups != null)) {
                     add(LongPressMenuEntry(Icons.Default.Folder, groups.groupOf(card.key)?.let { "分组：${it.name}" } ?: "分组",
                         tag = "clipboard-item-group") { menuFocus = 0; groupMenu = anchor })
                 }
@@ -848,7 +862,7 @@ internal fun ClipboardBoardView(
                 add(CompactActionMenuEntry(Icons.Default.PhotoLibrary, if (photoAccess) "关闭最近截图" else "启用最近截图",
                     tag = "clipboard-photos", onClick = onPhotoAccess))
                 onPullRemote?.let { action -> add(CompactActionMenuEntry(Icons.Default.Sync, "同步", tag = "clipboard-sync", onClick = action)) }
-                onManageGroups?.let { action -> add(CompactActionMenuEntry(Icons.Default.Folder, "管理分组",
+                if (!groupsHidden) onManageGroups?.let { action -> add(CompactActionMenuEntry(Icons.Default.Folder, "管理分组",
                     tag = "clipboard-manage-groups") { action(null) }) }
                 onOpenSettings?.let { action -> add(CompactActionMenuEntry(Icons.Default.Settings, "剪贴板设置",
                     tag = "clipboard-settings", onClick = action)) }
@@ -962,7 +976,8 @@ private fun ClipboardRecordCard(
                     .padding(start = if (selecting) 28.dp else 8.dp,
                         end = if (pinned) 26.dp else 8.dp, top = if (oneLine) 0.dp else 8.dp, bottom = if (oneLine) 0.dp else 8.dp),
                 color = if (highlighted) colors.onSecondaryContainer else colors.onSurface,
-                fontSize = 16.sp, lineHeight = 23.sp,
+                // 一条一行以后一屏能放更多条：字号、行高比原来的 16/23 稍小一点。
+                fontSize = 14.sp, lineHeight = 20.sp,
                 maxLines = if (oneLine) 1 else if (previewHeight != null) 3 else maxLines,
                 overflow = TextOverflow.Ellipsis)
             is ClipboardCard.Image -> {

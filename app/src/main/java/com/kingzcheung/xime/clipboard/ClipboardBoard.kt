@@ -69,6 +69,13 @@ internal fun clipboardColumnCount(widthDp: Float): Int = (widthDp / 160f).toInt(
  */
 internal const val CLIPBOARD_LIST_LAYOUT_KEY = "list_layout"
 
+/**
+ * 关闭分组显示（board prefs，默认 false＝照旧）。
+ * 打开后剪贴板顶栏不再有分类/分组那一排入口，长按菜单不再有「分组」，记录只按时间排；
+ * 分组本身和里面的记录都保留，只是不显示入口，关掉这个开关就都回来了。
+ */
+internal const val CLIPBOARD_GROUPS_HIDDEN_KEY = "groups_hidden"
+
 /** Key of the one row holding the recent pictures in the list layout. */
 internal const val CLIPBOARD_IMAGE_STRIP_KEY = "image-strip"
 

@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material3.RadioButton
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.twotone.Dialpad
+import androidx.compose.material.icons.twotone.SwapHoriz
 import androidx.compose.material.icons.twotone.Gesture
 import androidx.compose.material.icons.twotone.FormatListNumbered
 import androidx.compose.material.icons.twotone.FormatColorFill
@@ -161,6 +162,14 @@ private fun LayoutDisplayPage(
                             "退格删掉空的一对。实体键盘不变。",
                         checked = pairedSymbols, onCheckedChange = {
                             pairedSymbols = it; SettingsPreferences.setPairedSymbolsEnabled(context, it)
+                        })
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                    var swapModeKeys by remember { mutableStateOf(SettingsPreferences.isSymbolNumberSwapped(context)) }
+                    SettingsToggleItem(Icons.TwoTone.SwapHoriz, "交换符号和数字键",
+                        "把打字主界面左下角的「符号」和「数字」两个键换个位置：默认符号在左、数字在右，" +
+                            "打开后数字在左、符号在右。符号页、数字页那一格的「返回键盘」也跟着换边。",
+                        checked = swapModeKeys, onCheckedChange = {
+                            swapModeKeys = it; SettingsPreferences.setSymbolNumberSwapped(context, it)
                         })
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     var enterSends by remember { mutableStateOf(SettingsPreferences.isEnterSendsEnabled(context)) }
