@@ -1,8 +1,10 @@
 name: Build APK Only
 
-# 只编译 APK、不跑单元测试的流水线。
-# 官方的 Build and Test APK 会在 CI 上跑单元测试，那一步会报错（221 个测试全过、0 失败，仍是退出码 1，
-# 属于官方 CI 脚本在 CI 环境里的问题，跟我们的改动无关）。这条流水线只做三件事：拉代码、装工具、编 APK。
+# 只编译 APK、不跑单元测试。相比官方 build.yml 修了两个会失败的点：
+# 1) 单元测试任务在云端会异常退出（测试本身 221 个全过、0 失败），这里不跑测试；
+# 2) 项目自带的 downloadOnnx 去 GitHub 下 onnxruntime 头文件时 404（tag v1.28.0 不存在），
+#    导致 onnx_env.cc / onnx_jni.cc 报 "onnxruntime_c_api.h not found"。
+#    这里改从 NuGet 取同版本(1.28.0)的头文件，铺到 CMake 期望的 app/src/main/jni/onnxruntime/include。
 
 on:
   workflow_dispatch:
@@ -42,13 +44,35 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build unzip
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Download native deps (ONNX Runtime)
+      - name: Download native deps (ONNX Runtime .so)
         run: ./gradlew downloadOnnx --no-daemon
+
+      - name: Provide ONNX Runtime headers (from NuGet)
+        run: |
+          set -euo pipefail
+          OUT="app/src/main/jni/onnxruntime/include"
+          mkdir -p "$OUT"
+          curl -sSL --retry 3 --retry-delay 2 -o /tmp/ort.nupkg \
+            "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.28.0/microsoft.ml.onnxruntime.1.28.0.nupkg"
+          ls -l /tmp/ort.nupkg
+          rm -rf /tmp/ort && mkdir -p /tmp/ort
+          unzip -q -o /tmp/ort.nupkg -d /tmp/ort
+          HDR_FILE="$(find /tmp/ort -name onnxruntime_c_api.h | head -1)"
+          if [ -z "$HDR_FILE" ]; then
+            echo "::error::NuGet 包里没找到 onnxruntime_c_api.h，下面是包内容前 80 行："
+            find /tmp/ort -maxdepth 4 | head -80
+            exit 1
+          fi
+          HDR_DIR="$(dirname "$HDR_FILE")"
+          echo "headers from: $HDR_DIR"
+          cp -v "$HDR_DIR"/* "$OUT"/
+          echo "已放置 $(ls -1 "$OUT" | wc -l) 个头文件："
+          ls -1 "$OUT"
 
       - name: Build Debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
