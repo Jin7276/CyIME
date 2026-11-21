@@ -331,11 +331,12 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private val quickSendItemsState = mutableStateOf<List<com.kingzcheung.xime.clipboard.ClipboardItem>>(emptyList())
     internal val recentClipboardItemsState = mutableStateOf<List<com.kingzcheung.xime.clipboard.ClipboardItem>>(emptyList())
     /**
-     * 候选栏剪贴板胶囊「同一内容只显示一次」：这一轮输入里已经显示过的复制内容（按文字算）记在这里，
-     * 之后换输入框、收起再弹出键盘都不再重复显示同一条（用户反馈：复制后点输入框粘贴，复制的内容反复出现在候选栏）。
+     * 候选栏剪贴板胶囊「同一内容在同一个应用里只显示一次」：记 文字 → 显示过它的包名。
+     * 在 A 应用复制、切到 B 应用的输入框要照常显示（跨应用粘贴是主要用法，11-20 反馈这里不能吞）；
+     * 回到已经显示过这条内容的同一个应用（换输入框、收起再弹出）才不再重复弹。
      * 点胶囊上屏照旧标成已用（[com.kingzcheung.xime.clipboard.ClipboardManager.markConsumed]），新复制的内容不受影响。
      */
-    private val shownClipSuggestionTexts = LinkedHashSet<String>()
+    private val shownClipSuggestionPackages = LinkedHashMap<String, String>()
     /** 记多少条就够；超出丢最早的，避免长会话一直涨。 */
     private val shownClipSuggestionLimit = 64
     /** 候选栏剪贴板胶囊的各项：每条原文，带链接的后面跟干净链接和 BV 号（见 ClipboardLinkChoices）。 */
@@ -345,20 +346,26 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
 
     /**
-     * 这一轮输入结束了：把刚在候选栏显示过的复制内容记下来，下次（换输入框、收起再弹出）不再显示同一内容。
-     * 只在主线程调用；[recentClipboardItemsState] 为空时什么都不做。
+     * 这一轮输入结束了：把刚在候选栏显示过的复制内容，连同「在哪个应用里显示的」一起记下来。
+     * 之后同一个应用再进输入框不重复弹；换到别的应用照常显示（跨应用粘贴是主要用法）。
+     * 只在主线程调用；[recentClipboardItemsState] 为空、或当前没有输入框时什么都不做。
      */
     private fun rememberShownClipSuggestions() {
+        val pkg = currentInputEditorInfo?.packageName ?: return
         // 短信验证码那种一次性提示（还没过期就还能用）不算在里面，免得换个输入框就不提示了。
         val code = if (::clipboardManager.isInitialized) clipboardManager.verificationCode.value?.text else null
         recentClipboardItemsState.value.forEach { item ->
             if (item.text.isEmpty() || item.text == code) return@forEach
-            shownClipSuggestionTexts.add(item.text)
-            while (shownClipSuggestionTexts.size > shownClipSuggestionLimit) {
-                shownClipSuggestionTexts.remove(shownClipSuggestionTexts.first())
+            shownClipSuggestionPackages[item.text] = pkg
+            while (shownClipSuggestionPackages.size > shownClipSuggestionLimit) {
+                shownClipSuggestionPackages.remove(shownClipSuggestionPackages.keys.first())
             }
         }
     }
+
+    /** 这条复制内容是不是已经在 [pkg] 这个应用里显示过了（同应用不重复弹，跨应用照常弹）。 */
+    private fun clipSuggestionAlreadyShownIn(text: String, pkg: String?): Boolean =
+        pkg != null && shownClipSuggestionPackages[text] == pkg
 
 
     private val bottomInsetPxState = mutableStateOf(0)
@@ -4004,9 +4011,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         try {
             if (clipboardManager.images.pasteFailure.value?.packageName != attribute?.packageName) clipboardManager.images.clearPasteFailure()
             clipboardManager.refreshClipboard()
-            // 同一内容只显示一次：这一轮之前已经显示过的复制内容不再重复出现在候选栏。
+            // 同一内容在同一应用里只显示一次：本应用已经弹过的不再重复，跨应用（A 复制 → B 输入框）照常显示。
+            val clipSuggestPkg = attribute?.packageName
             recentClipboardItemsState.value = clipboardManager.getRecentItems(30)
-                .filterNot { it.text in shownClipSuggestionTexts }
+                .filterNot { clipSuggestionAlreadyShownIn(it.text, clipSuggestPkg) }
                 .distinctBy { it.text }
             val recentImage = clipboardManager.images.preview.value?.takeIf { it.timestamp >= (recentClipboardItemsState.value.maxOfOrNull { item -> item.timestamp } ?: 0) }
             // 将最近剪切板内容显示在候选栏。没有可显示的就不标成「在显示剪贴板」：以前一律标上，
@@ -4027,9 +4035,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         clipboardCollectorJob?.cancel()
         clipboardCollectorJob = serviceScope.launch {
             combine(clipboardManager.clipboardItems, clipboardManager.verificationCode, clipboardManager.images.preview) { _, _, _ -> Unit }.collect {
-                // 同一内容只显示一次：本次会话开始前已经显示过的复制内容不再重复显示。
+                // 同一内容在同一应用里只显示一次（跨应用照常显示，见 clipSuggestionAlreadyShownIn）。
+                val clipSuggestPkg = currentInputEditorInfo?.packageName
                 val items = clipboardManager.getRecentItems(30)
-                    .filterNot { it.text in shownClipSuggestionTexts }
+                    .filterNot { clipSuggestionAlreadyShownIn(it.text, clipSuggestPkg) }
                     .distinctBy { it.text }
                 if (!canShowClipboardSuggestions(candidateState.value.isComposing,
                         candidateState.value.pendingEnglishText, inputCommands.hasPendingCommands)) return@collect
