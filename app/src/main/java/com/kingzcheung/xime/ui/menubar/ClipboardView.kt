@@ -227,10 +227,12 @@ internal fun LongPressMenuOverlay(
         val widthCap = with(density) { 260.dp.toPx() }
         androidx.compose.ui.layout.Layout(content = {
             Surface(Modifier.testTag(tag), shape = RoundedCornerShape(12.dp), color = cardColor, shadowElevation = 4.dp) {
-                // 长按菜单行更紧凑：一行 36dp（原 48dp），上下内边距 3dp（原 10dp），图标 17dp、字 14sp。
-                // 一条文本记录最多 7 项（固定/分组/分词/编辑/翻译/多选/删除），原来要滚动才能点到「删除」，
-                // 现在整列约 260dp，常见面板高度下不用滚。
-                Column(Modifier.testTag(surfaceTag).verticalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
+                // 长按菜单行高跟着「面板可用高度 ÷ 项数」自动收缩：项多、面板矮时更矮，
+                // 尽量一屏放得下「删除」（26dp 下限，36dp 上限）。原来固定 48dp，5~7 项必然要滚动。
+                val menuColumnPadding = 2.dp
+                val menuRowHeight = ((maxHeight - 12.dp - menuColumnPadding * 2 - 6.dp) /
+                    menuItems.size.coerceAtLeast(1)).coerceIn(26.dp, 36.dp)
+                Column(Modifier.testTag(surfaceTag).verticalScroll(rememberScrollState()).padding(vertical = menuColumnPadding)) {
                     title?.let {
                         Text(it, color = cardText, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
@@ -243,7 +245,7 @@ internal fun LongPressMenuOverlay(
                         if (index > 0 || title != null) HorizontalDivider(Modifier.padding(horizontal = 10.dp),
                             color = cardText.copy(alpha = .12f))
                         val tint = entry.tint ?: cardText
-                        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp)
+                        Row(Modifier.fillMaxWidth().heightIn(min = menuRowHeight)
                             .then(entry.tag?.let { Modifier.testTag(it) } ?: Modifier)
                             .background(if (index == focusedIndex) cardText.copy(alpha = .12f) else Color.Transparent)
                             .clickable(enabled = entry.enabled) { onDismiss(); entry.onClick() }

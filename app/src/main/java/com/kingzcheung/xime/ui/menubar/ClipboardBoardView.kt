@@ -561,7 +561,7 @@ internal fun ClipboardBoardView(
 
         Column(Modifier.fillMaxSize()) {
             if (showControls) Row(Modifier.fillMaxWidth().clipboardPanelExpandGesture()
-                .testTag("clipboard-controls").padding(horizontal = 6.dp, vertical = 2.dp),
+                .testTag("clipboard-controls").padding(horizontal = 6.dp, vertical = 0.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 if (selecting) {
                     CompactClipboardAction(Icons.Default.Close, "退出多选", {
@@ -607,7 +607,7 @@ internal fun ClipboardBoardView(
                         }
                     }
                     if (content.pinsCollapsible) {
-                        Box(Modifier.heightIn(min = PanelCategoryHeight).clip(RoundedCornerShape(50))
+                        Box(Modifier.heightIn(min = ClipboardTopBarHeight).clip(RoundedCornerShape(50))
                             .semantics { stateDescription = if (pinsActuallyExpanded) "已展开" else "已收起" }
                             .clickable(role = Role.Button,
                                 onClickLabel = if (pinsActuallyExpanded) "收起" else "展开全部 ${content.pinnedCount} 条固定内容") {
@@ -915,13 +915,17 @@ internal fun ClipboardBoardView(
     }
 }
 
+/** 剪贴板顶栏（搜索 / 新增 / 更多 / 分类）的行高：比通用设置行矮，省出记录区的空间（用户 11-21：上下空白太大）。 */
+private val ClipboardTopBarHeight = 26.dp
+
 @Composable
-private fun CompactClipboardFilter(label: String, isSelected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun CompactClipboardFilter(label: String, isSelected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier,
+    minHeight: Dp = ClipboardTopBarHeight) {
     val colors = MaterialTheme.colorScheme
     val glass = LocalKeyboardInputPreferences.current.frostedGlass
     val bringIntoView = remember { BringIntoViewRequester() }
     LaunchedEffect(isSelected) { if (isSelected) bringIntoView.bringIntoView() }
-    Box(modifier.bringIntoViewRequester(bringIntoView).heightIn(min = PanelCategoryHeight).clip(RoundedCornerShape(6.dp))
+    Box(modifier.bringIntoViewRequester(bringIntoView).heightIn(min = minHeight).clip(RoundedCornerShape(6.dp))
         .background(if (isSelected) frostedKeyColor(colors.secondaryContainer, colors.onSurface, glass) else Color.Transparent)
         .semantics { selected = isSelected }
         .clickable(role = Role.Tab, onClick = onClick)
@@ -1029,9 +1033,10 @@ private fun ClipboardRecordCard(
 
 @Composable
 private fun CompactClipboardAction(icon: ImageVector, description: String, onClick: () -> Unit, tag: String,
-    enabled: Boolean = true, label: String? = null, modifier: Modifier = Modifier) {
+    enabled: Boolean = true, label: String? = null, modifier: Modifier = Modifier,
+    minHeight: Dp = ClipboardTopBarHeight) {
     val color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else .38f)
-    Row(modifier.heightIn(min = PanelCategoryHeight).widthIn(min = 28.dp).clip(RoundedCornerShape(6.dp))
+    Row(modifier.heightIn(min = minHeight).widthIn(min = 28.dp).clip(RoundedCornerShape(6.dp))
         .testTag(tag).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = 4.dp), horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically) {
